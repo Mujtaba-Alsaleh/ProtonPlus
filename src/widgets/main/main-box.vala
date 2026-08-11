@@ -12,6 +12,7 @@ namespace ProtonPlus.Widgets.Main {
         Tools.Box tools_box { get; set; }
         Games.Box games_box { get; set; }
         MangoHud.Box mangohud_box { get; set; }
+        Prefixes.Box prefixes_box { get; set; }
         private Services.SteamRestartManager? restart_manager;
         private Services.SteamRestartOrchestrator? restart_orchestrator;
         private SteamRestartBanner? restart_banner;
@@ -66,6 +67,7 @@ namespace ProtonPlus.Widgets.Main {
             });
 
             mangohud_box = new MangoHud.Box ();
+            prefixes_box = new Prefixes.Box ();
 
             view_stack = new Adw.ViewStack ();
             view_stack.notify["visible-child-name"].connect (view_stack_visible_child_name_changed);
@@ -79,6 +81,9 @@ namespace ProtonPlus.Widgets.Main {
             } else {
                 mangohud_page.visible = false;
             }
+
+            var prefixes_page = view_stack.add_titled_with_icon (prefixes_box, "prefixes", _ ("Wine Prefixes"), "drive-harddisk-symbolic");
+            Globals.SETTINGS.bind ("experimental-features", prefixes_page, "visible", SettingsBindFlags.DEFAULT);
 
             view_switcher = new Adw.ViewSwitcher ();
             view_switcher.set_stack (view_stack);
@@ -428,6 +433,9 @@ namespace ProtonPlus.Widgets.Main {
                 case "mangohud":
                     mangohud_box.show_presets_page ();
                     break;
+                case "prefixes":
+                    prefixes_box.show_prefixes_page ();
+                    break;
             }
 
             previous_view_name = view_stack.get_visible_child_name ();
@@ -468,6 +476,9 @@ namespace ProtonPlus.Widgets.Main {
                     break;
                 case "mangohud":
                     mangohud_box.show_presets_page ();
+                    break;
+                case "prefixes":
+                    prefixes_box.show_prefixes_page ();
                     break;
             }
         }

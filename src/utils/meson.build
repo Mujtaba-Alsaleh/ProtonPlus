@@ -19,6 +19,7 @@ sources += files(
     'download-manager.vala',
     'mangohud-manager.vala',
     'cache-manager.vala',
+    'prefixes-manager.vala',
 )
 
 subdir('internal')

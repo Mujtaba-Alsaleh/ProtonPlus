@@ -93,6 +93,7 @@ src/utils/internal/metainfo-loader.vala
 src/utils/mangohud-manager.vala
 src/utils/metadata.vala
 src/utils/parser.vala
+src/utils/prefixes-manager.vala
 src/utils/system.vala
 src/utils/theme-manager.vala
 src/utils/vdf/binary.vala
@@ -202,6 +203,7 @@ src/widgets/preferences/preferences-steam-shortcut-row.vala
 src/widgets/preferences/preferences-theme-row.vala
 src/widgets/preferences/preferences-tool-row.vala
 src/widgets/preferences/proxy-mode-row.vala
+src/widgets/prefixes/prefixes-box.vala
 src/widgets/tools/tools-box.vala
 src/widgets/tools/tools-game-row.vala
 src/widgets/tools/tools-group-box.vala
