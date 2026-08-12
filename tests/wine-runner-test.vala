@@ -110,7 +110,10 @@ namespace AppTests.WineRunnerTest {
         backend.run_stdout = "wine-9.0 (Staging)";
 
         var service = new ProtonPlus.Utils.WineRunnerService (backend);
-        var binary = new ProtonPlus.Utils.WineBinary ("/usr/bin", "System Wine");
+        var root = create_temp_directory ();
+        write_file (Path.build_filename (root, "wine"), "");
+
+        var binary = new ProtonPlus.Utils.WineBinary (root, "System Wine");
 
         var loop = new MainLoop ();
         string version = "";
@@ -132,6 +135,8 @@ namespace AppTests.WineRunnerTest {
         });
         loop.run ();
         assert (backend.ran_commands.size == 1);
+
+        assert (delete_directory (root));
     }
 
     private void test_backup_command_construction () {
