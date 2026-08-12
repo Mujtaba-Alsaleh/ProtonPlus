@@ -266,74 +266,15 @@ namespace ProtonPlus.Utils {
         }
 
         private const string APPDEFAULTS_SECTION = "Software\\\\Wine\\\\AppDefaults\\\\";
-        private const string DEBUG_SECTION = "Software\\\\Wine\\\\Debug";
-        private const string EXTERNAL_FONTS_SECTION = "Software\\\\Wine\\\\Fonts\\\\External Fonts";
-        private const string DRIVES_SECTION = "Software\\\\Wine\\\\Drives";
 
         private string[] _collect_tweaks (string pfx) {
             var tweaks = new Gee.TreeSet<string> ();
-            string reg_path = Path.build_filename (pfx, "user.reg");
-            if (!FileUtils.test (reg_path, FileTest.EXISTS))
-                return {};
 
-            string content;
-            try {
-                FileUtils.get_contents (reg_path, out content);
-            } catch (FileError e) {
-                return {};
-            }
-
-            int app_defaults_sections = 0;
-            bool debug_relay = false;
-            int external_fonts = 0;
-            int extra_drives = 0;
-
-            string current_section = "";
-            foreach (string raw_line in content.split ("\n")) {
-                string line = raw_line.strip ();
-                if (line == "")
-                    continue;
-
-                if (line.has_prefix ("[")) {
-                    int end = line.index_of ("]");
-                    if (end > 1)
-                        current_section = line[1:end];
-                    else
-                        current_section = "";
-                    continue;
-                }
-
-                if (line.has_prefix ("#") || line.has_prefix (";"))
-                    continue;
-
-                if (current_section.has_prefix (APPDEFAULTS_SECTION))
-                    app_defaults_sections++;
-                else if (current_section == DEBUG_SECTION &&
-                         (line.has_prefix ("\"RelayExclude\"") || line.has_prefix ("\"RelayFromExclude\"")))
-                    debug_relay = true;
-                else if (current_section == EXTERNAL_FONTS_SECTION)
-                    external_fonts++;
-                else if (current_section == DRIVES_SECTION && !line.has_prefix ("#")) {
-                    try {
-                        MatchInfo match;
-                        var drive_regex = new Regex ("^\"([A-Z]:)\"");
-                        if (drive_regex.match (line, 0, out match)) {
-                            string drive = match.fetch (1);
-                            if (drive != "C:" && drive != "Z:")
-                                extra_drives++;
-                        }
-                    } catch (RegexError e) {
-                        // Ignore malformed lines
-                    }
-                }
-            }
-
+            int app_defaults_sections = _count_app_default_sections (pfx);
             if (app_defaults_sections > 0)
                 tweaks.add (ngettext ("%d per-app setting", "%d per-app settings", app_defaults_sections).printf (app_defaults_sections));
-            if (debug_relay)
-                tweaks.add (_ ("Debug relay exclusions"));
-            if (external_fonts > 0)
-                tweaks.add (ngettext ("%d external font", "%d external fonts", external_fonts).printf (external_fonts));
+
+            int extra_drives = _count_extra_drives (pfx);
             if (extra_drives > 0)
                 tweaks.add (ngettext ("%d extra drive", "%d extra drives", extra_drives).printf (extra_drives));
 
@@ -342,6 +283,64 @@ namespace ProtonPlus.Utils {
             foreach (string tweak in tweaks)
                 result[i++] = tweak;
             return result;
+        }
+
+        /* Wine writes RelayExclude and host font imports into every prefix, so
+         * only genuinely manual configuration is reported here: per-app
+         * overrides and drive mappings beyond the standard c:, d:, z:. */
+        private static int _count_app_default_sections (string pfx) {
+            string reg_path = Path.build_filename (pfx, "user.reg");
+            if (!FileUtils.test (reg_path, FileTest.EXISTS))
+                return 0;
+
+            string content;
+            try {
+                FileUtils.get_contents (reg_path, out content);
+            } catch (FileError e) {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (string raw_line in content.split ("\n")) {
+                string line = raw_line.strip ();
+                if (line.has_prefix ("[") && line[1:].has_prefix (APPDEFAULTS_SECTION))
+                    count++;
+            }
+            return count;
+        }
+
+        private static int _count_extra_drives (string pfx) {
+            string dosdevices = Path.build_filename (pfx, "dosdevices");
+            if (!FileUtils.test (dosdevices, FileTest.IS_DIR))
+                return 0;
+
+            int count = 0;
+            try {
+                var dir = File.new_for_path (dosdevices);
+                var enumerator = dir.enumerate_children (
+                    FileAttribute.STANDARD_NAME,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS
+                );
+
+                FileInfo info;
+                while ((info = enumerator.next_file ()) != null) {
+                    if (_is_extra_drive (info.get_name ()))
+                        count++;
+                }
+            } catch (Error e) {
+                // Ignore permission errors
+            }
+            return count;
+        }
+
+        private static bool _is_extra_drive (string name) {
+            if (name.length < 2 || name[1] != ':')
+                return false;
+            char c = name[0];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+                return false;
+            string letter = name[0:1].down ();
+            return letter != "c" && letter != "d" && letter != "z";
         }
 
         private void _collect_dates (WinePrefix prefix) {

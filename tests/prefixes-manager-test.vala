@@ -267,47 +267,44 @@ namespace AppTests.PrefixesManagerTest {
         var home = Path.build_filename (root, "home");
         var prefix = Path.build_filename (home, "pfx");
         make_directory (Path.build_filename (prefix, "drive_c", "windows"));
+        make_directory (Path.build_filename (prefix, "dosdevices"));
         write_file (Path.build_filename (prefix, "user.reg"),
             "WINE REGISTRY Version 2\n"
             + "#arch=win64\n"
             + "[Software\\\\Wine\\\\AppDefaults\\\\foo.exe\\\\Graphics] 1\n"
             + "\"Setting\"=\"value\"\n"
-            + "[Software\\\\Wine\\\\AppDefaults\\\\foo.exe\\\\Graphics] 1\n"
+            + "[Software\\\\Wine\\\\AppDefaults\\\\bar.exe\\\\DllOverrides] 1\n"
             + "[Software\\\\Wine\\\\Debug] 1\n"
             + "\"RelayExclude\"=\"ntdll.RtlEnterCriticalSection\"\n"
             + "[Software\\\\Wine\\\\Fonts\\\\External Fonts] 1\n"
             + "\"@Font1\"=\"Z:\\\\font1.ttf\"\n"
-            + "\"@Font2\"=\"Z:\\\\font2.ttf\"\n"
-            + "[Software\\\\Wine\\\\Drives] 1\n"
-            + "#time=1dd29e9653048ee\n"
-            + "\"C:\"=\"drive_c\"\n"
-            + "\"Z:\"=\"/\"\n"
-            + "\"D:\"=\"/mnt/data\"\n");
+            + "\"@Font2\"=\"Z:\\\\font2.ttf\"\n");
+        // Standard drives only (c:, d::, z:) plus com ports are not tweaks.
+        assert (Posix.symlink ("..", Path.build_filename (prefix, "dosdevices", "c:")) == 0);
+        assert (Posix.symlink ("/dev/cdrom", Path.build_filename (prefix, "dosdevices", "d::")) == 0);
+        assert (Posix.symlink ("/", Path.build_filename (prefix, "dosdevices", "z:")) == 0);
+        assert (Posix.symlink ("/dev/ttyS0", Path.build_filename (prefix, "dosdevices", "com1")) == 0);
+        // A genuinely added drive is reported.
+        assert (Posix.symlink ("/mnt/data", Path.build_filename (prefix, "dosdevices", "e:")) == 0);
 
         var prefixes = scan (home, true);
         var found = find_prefix (prefixes, prefix);
         assert (found != null);
         scan_details ((!) found);
 
-        assert (((!) found).detected_tweaks.length == 4);
+        assert (((!) found).detected_tweaks.length == 2);
 
         bool has_app_defaults = false;
-        bool has_debug = false;
-        bool has_fonts = false;
         bool has_drives = false;
         foreach (string tweak in ((!) found).detected_tweaks) {
             if (tweak.contains ("per-app setting"))
                 has_app_defaults = true;
-            if (tweak == "Debug relay exclusions")
-                has_debug = true;
-            if (tweak.contains ("external font"))
-                has_fonts = true;
             if (tweak.contains ("extra drive"))
                 has_drives = true;
+            assert (!tweak.contains ("Debug relay"));
+            assert (!tweak.contains ("external font"));
         }
         assert (has_app_defaults);
-        assert (has_debug);
-        assert (has_fonts);
         assert (has_drives);
 
         assert (delete_directory (root));
@@ -318,12 +315,17 @@ namespace AppTests.PrefixesManagerTest {
         var home = Path.build_filename (root, "home");
         var prefix = Path.build_filename (home, "pfx");
         make_directory (Path.build_filename (prefix, "drive_c", "windows"));
+        make_directory (Path.build_filename (prefix, "dosdevices"));
         write_file (Path.build_filename (prefix, "user.reg"),
             "WINE REGISTRY Version 2\n"
             + "[Software\\\\Wine\\\\DllOverrides]\n"
-            + "[Software\\\\Wine\\\\Drives] 1\n"
-            + "\"C:\"=\"drive_c\"\n"
-            + "\"Z:\"=\"/\"\n");
+            + "[Software\\\\Wine\\\\Debug] 1\n"
+            + "\"RelayExclude\"=\"ntdll.RtlEnterCriticalSection\"\n"
+            + "[Software\\\\Wine\\\\Fonts\\\\External Fonts] 1\n"
+            + "\"@Font1\"=\"Z:\\\\font1.ttf\"\n");
+        assert (Posix.symlink ("..", Path.build_filename (prefix, "dosdevices", "c:")) == 0);
+        assert (Posix.symlink ("/dev/cdrom", Path.build_filename (prefix, "dosdevices", "d::")) == 0);
+        assert (Posix.symlink ("/", Path.build_filename (prefix, "dosdevices", "z:")) == 0);
 
         var prefixes = scan (home, true);
         var found = find_prefix (prefixes, prefix);
