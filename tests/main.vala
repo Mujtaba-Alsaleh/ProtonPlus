@@ -57,6 +57,7 @@ int main (string[] args) {
     AppTests.SteamRestartOrchestratorTest.register_tests ();
     AppTests.SteamRestartPresentationTest.register_tests ();
     AppTests.PrefixesManagerTest.register_tests ();
+    AppTests.WineRunnerTest.register_tests ();
     AppTests.SteamTinkerLaunchTest.register_tests ();
     AppTests.UpdateTransactionTest.register_tests ();
     AppTests.VdfBinaryTest.register_tests ();

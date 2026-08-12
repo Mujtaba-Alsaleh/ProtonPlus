@@ -10,6 +10,8 @@ namespace AppTests.PrefixesManagerTest {
         Test.add_func ("/prefixes/dependency-detection", test_dependency_detection);
         Test.add_func ("/prefixes/clean-prefix-no-dependencies", test_clean_prefix_no_dependencies);
         Test.add_func ("/prefixes/ignores-symlinked-directories", test_ignores_symlinked_directories);
+        Test.add_func ("/prefixes/tweak-detection", test_tweak_detection);
+        Test.add_func ("/prefixes/tweak-detection-clean", test_tweak_detection_clean);
     }
 
     private string create_temp_directory () {
@@ -256,6 +258,79 @@ namespace AppTests.PrefixesManagerTest {
 
         var prefixes = scan (home, true);
         assert (prefixes.size == 0);
+
+        assert (delete_directory (root));
+    }
+
+    private void test_tweak_detection () {
+        var root = create_temp_directory ();
+        var home = Path.build_filename (root, "home");
+        var prefix = Path.build_filename (home, "pfx");
+        make_directory (Path.build_filename (prefix, "drive_c", "windows"));
+        write_file (Path.build_filename (prefix, "user.reg"),
+            "WINE REGISTRY Version 2\n"
+            + "#arch=win64\n"
+            + "[Software\\\\Wine\\\\AppDefaults\\\\foo.exe\\\\Graphics] 1\n"
+            + "\"Setting\"=\"value\"\n"
+            + "[Software\\\\Wine\\\\AppDefaults\\\\foo.exe\\\\Graphics] 1\n"
+            + "[Software\\\\Wine\\\\Debug] 1\n"
+            + "\"RelayExclude\"=\"ntdll.RtlEnterCriticalSection\"\n"
+            + "[Software\\\\Wine\\\\Fonts\\\\External Fonts] 1\n"
+            + "\"@Font1\"=\"Z:\\\\font1.ttf\"\n"
+            + "\"@Font2\"=\"Z:\\\\font2.ttf\"\n"
+            + "[Software\\\\Wine\\\\Drives] 1\n"
+            + "#time=1dd29e9653048ee\n"
+            + "\"C:\"=\"drive_c\"\n"
+            + "\"Z:\"=\"/\"\n"
+            + "\"D:\"=\"/mnt/data\"\n");
+
+        var prefixes = scan (home, true);
+        var found = find_prefix (prefixes, prefix);
+        assert (found != null);
+        scan_details ((!) found);
+
+        assert (((!) found).detected_tweaks.length == 4);
+
+        bool has_app_defaults = false;
+        bool has_debug = false;
+        bool has_fonts = false;
+        bool has_drives = false;
+        foreach (string tweak in ((!) found).detected_tweaks) {
+            if (tweak.contains ("per-app setting"))
+                has_app_defaults = true;
+            if (tweak == "Debug relay exclusions")
+                has_debug = true;
+            if (tweak.contains ("external font"))
+                has_fonts = true;
+            if (tweak.contains ("extra drive"))
+                has_drives = true;
+        }
+        assert (has_app_defaults);
+        assert (has_debug);
+        assert (has_fonts);
+        assert (has_drives);
+
+        assert (delete_directory (root));
+    }
+
+    private void test_tweak_detection_clean () {
+        var root = create_temp_directory ();
+        var home = Path.build_filename (root, "home");
+        var prefix = Path.build_filename (home, "pfx");
+        make_directory (Path.build_filename (prefix, "drive_c", "windows"));
+        write_file (Path.build_filename (prefix, "user.reg"),
+            "WINE REGISTRY Version 2\n"
+            + "[Software\\\\Wine\\\\DllOverrides]\n"
+            + "[Software\\\\Wine\\\\Drives] 1\n"
+            + "\"C:\"=\"drive_c\"\n"
+            + "\"Z:\"=\"/\"\n");
+
+        var prefixes = scan (home, true);
+        var found = find_prefix (prefixes, prefix);
+        assert (found != null);
+        scan_details ((!) found);
+
+        assert (((!) found).detected_tweaks.length == 0);
 
         assert (delete_directory (root));
     }

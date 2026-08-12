@@ -102,6 +102,7 @@ src/utils/vdf/node.vala
 src/utils/vdf/shortcut.vala
 src/utils/vdf/vdf-parser.vala
 src/utils/web.vala
+src/utils/wine-runner.vala
 src/widgets/application.vala
 src/widgets/circular-progress-bar.vala
 src/widgets/controller-choice-box.vala

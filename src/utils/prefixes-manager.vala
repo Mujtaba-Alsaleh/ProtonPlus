@@ -5,6 +5,9 @@ namespace ProtonPlus.Utils {
         public string[] symlink_targets { get; set; }
         public string[] detected_dependencies { get; set; }
         public string[] dll_overrides { get; set; }
+        public string[] detected_tweaks { get; set; }
+        public DateTime? created_at { get; set; }
+        public DateTime? modified_at { get; set; }
 
         public WinePrefix (string path) {
             Object (path: path);
@@ -182,7 +185,12 @@ namespace ProtonPlus.Utils {
                 return {};
             }
 
-            var override_regex = new Regex ("^\"\\*?([^\"]+)\"\\s*=\\s*\"([^\"]*)\"");
+            Regex? override_regex = null;
+            try {
+                override_regex = new Regex ("^\"\\*?([^\"]+)\"\\s*=\\s*\"([^\"]*)\"");
+            } catch (RegexError e) {
+                warning (e.message);
+            }
             bool in_section = false;
             foreach (string raw_line in content.split ("\n")) {
                 string line = raw_line.strip ();
@@ -201,15 +209,19 @@ namespace ProtonPlus.Utils {
                 if (!in_section || line.has_prefix ("#") || line.has_prefix (";"))
                     continue;
 
+                if (override_regex == null)
+                    continue;
+
                 MatchInfo match;
-                if (override_regex.match (line, 0, out match)) {
-                    string name = match.fetch (1);
-                    string value = match.fetch (2);
-                    if (value.contains ("native")) {
-                        if (name.has_prefix ("*"))
-                            name = name[1:];
-                        overrides.add (name);
-                    }
+                if (!override_regex.match (line, 0, out match))
+                    continue;
+
+                string name = match.fetch (1);
+                string value = match.fetch (2);
+                if (value.contains ("native")) {
+                    if (name.has_prefix ("*"))
+                        name = name[1:];
+                    overrides.add (name);
                 }
             }
 
@@ -253,9 +265,134 @@ namespace ProtonPlus.Utils {
             results.sort ((a, b) => a.path.collate (b.path));
         }
 
+        private const string APPDEFAULTS_SECTION = "Software\\\\Wine\\\\AppDefaults\\\\";
+        private const string DEBUG_SECTION = "Software\\\\Wine\\\\Debug";
+        private const string EXTERNAL_FONTS_SECTION = "Software\\\\Wine\\\\Fonts\\\\External Fonts";
+        private const string DRIVES_SECTION = "Software\\\\Wine\\\\Drives";
+
+        private string[] _collect_tweaks (string pfx) {
+            var tweaks = new Gee.TreeSet<string> ();
+            string reg_path = Path.build_filename (pfx, "user.reg");
+            if (!FileUtils.test (reg_path, FileTest.EXISTS))
+                return {};
+
+            string content;
+            try {
+                FileUtils.get_contents (reg_path, out content);
+            } catch (FileError e) {
+                return {};
+            }
+
+            int app_defaults_sections = 0;
+            bool debug_relay = false;
+            int external_fonts = 0;
+            int extra_drives = 0;
+
+            string current_section = "";
+            foreach (string raw_line in content.split ("\n")) {
+                string line = raw_line.strip ();
+                if (line == "")
+                    continue;
+
+                if (line.has_prefix ("[")) {
+                    int end = line.index_of ("]");
+                    if (end > 1)
+                        current_section = line[1:end];
+                    else
+                        current_section = "";
+                    continue;
+                }
+
+                if (line.has_prefix ("#") || line.has_prefix (";"))
+                    continue;
+
+                if (current_section.has_prefix (APPDEFAULTS_SECTION))
+                    app_defaults_sections++;
+                else if (current_section == DEBUG_SECTION &&
+                         (line.has_prefix ("\"RelayExclude\"") || line.has_prefix ("\"RelayFromExclude\"")))
+                    debug_relay = true;
+                else if (current_section == EXTERNAL_FONTS_SECTION)
+                    external_fonts++;
+                else if (current_section == DRIVES_SECTION && !line.has_prefix ("#")) {
+                    try {
+                        MatchInfo match;
+                        var drive_regex = new Regex ("^\"([A-Z]:)\"");
+                        if (drive_regex.match (line, 0, out match)) {
+                            string drive = match.fetch (1);
+                            if (drive != "C:" && drive != "Z:")
+                                extra_drives++;
+                        }
+                    } catch (RegexError e) {
+                        // Ignore malformed lines
+                    }
+                }
+            }
+
+            if (app_defaults_sections > 0)
+                tweaks.add (ngettext ("%d per-app setting", "%d per-app settings", app_defaults_sections).printf (app_defaults_sections));
+            if (debug_relay)
+                tweaks.add (_ ("Debug relay exclusions"));
+            if (external_fonts > 0)
+                tweaks.add (ngettext ("%d external font", "%d external fonts", external_fonts).printf (external_fonts));
+            if (extra_drives > 0)
+                tweaks.add (ngettext ("%d extra drive", "%d extra drives", extra_drives).printf (extra_drives));
+
+            var result = new string[tweaks.size];
+            int i = 0;
+            foreach (string tweak in tweaks)
+                result[i++] = tweak;
+            return result;
+        }
+
+        private void _collect_dates (WinePrefix prefix) {
+            prefix.modified_at = _get_modification_time (prefix.path);
+
+            var created = _get_creation_time (prefix.path);
+            if (created == null) {
+                string system_reg = Path.build_filename (prefix.path, "system.reg");
+                if (FileUtils.test (system_reg, FileTest.EXISTS))
+                    created = _get_modification_time (system_reg);
+            }
+            prefix.created_at = created;
+        }
+
+        private DateTime? _get_creation_time (string path) {
+            try {
+                var info = File.new_for_path (path).query_info (
+                    FileAttribute.TIME_CREATED,
+                    FileQueryInfoFlags.NONE,
+                    null
+                );
+                uint64 unix_time = info.get_attribute_uint64 (FileAttribute.TIME_CREATED);
+                if (unix_time == 0)
+                    return null;
+                return new DateTime.from_unix_local ((int64) unix_time);
+            } catch (Error e) {
+                return null;
+            }
+        }
+
+        private DateTime? _get_modification_time (string path) {
+            try {
+                var info = File.new_for_path (path).query_info (
+                    FileAttribute.TIME_MODIFIED,
+                    FileQueryInfoFlags.NONE,
+                    null
+                );
+                uint64 unix_time = info.get_attribute_uint64 (FileAttribute.TIME_MODIFIED);
+                if (unix_time == 0)
+                    return null;
+                return new DateTime.from_unix_local ((int64) unix_time);
+            } catch (Error e) {
+                return null;
+            }
+        }
+
         private void _scan_details_internal (WinePrefix prefix) {
             prefix.symlink_targets = _collect_symlinks (prefix.path);
             _collect_runtime_info (prefix);
+            prefix.detected_tweaks = _collect_tweaks (prefix.path);
+            _collect_dates (prefix);
         }
 
         private void _find_drive_c_dirs (string root_path, string home, bool skip_tools, Gee.ArrayList<string> results) {

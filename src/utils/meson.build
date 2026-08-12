@@ -20,6 +20,7 @@ sources += files(
     'mangohud-manager.vala',
     'cache-manager.vala',
     'prefixes-manager.vala',
+    'wine-runner.vala',
 )
 
 subdir('internal')

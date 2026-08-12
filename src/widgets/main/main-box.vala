@@ -68,6 +68,7 @@ namespace ProtonPlus.Widgets.Main {
 
             mangohud_box = new MangoHud.Box ();
             prefixes_box = new Prefixes.Box ();
+            prefixes_box.toast_sent.connect (send_toast);
 
             view_stack = new Adw.ViewStack ();
             view_stack.notify["visible-child-name"].connect (view_stack_visible_child_name_changed);
@@ -136,6 +137,7 @@ namespace ProtonPlus.Widgets.Main {
         }
 
         public void initialize (Gee.LinkedList<Models.Launcher> launchers) {
+            prefixes_box.initialize (launchers);
             foreach (var launcher in launchers) {
                 if (launcher is Models.Launchers.Steam) {
                     var steam_launcher = launcher as Models.Launchers.Steam;

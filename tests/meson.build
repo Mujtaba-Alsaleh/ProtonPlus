@@ -50,6 +50,7 @@ test_sources = files(
     'steam-restart-orchestrator-test.vala',
     'steam-restart-presentation-test.vala',
     'prefixes-manager-test.vala',
+    'wine-runner-test.vala',
     'steamtinkerlaunch-test.vala',
     'update-transaction-test.vala',
     'vdf_binary_test.vala',
