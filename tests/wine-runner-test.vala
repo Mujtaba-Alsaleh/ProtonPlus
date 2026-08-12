@@ -233,7 +233,9 @@ namespace AppTests.WineRunnerTest {
     private void test_create_rebuild_delete () {
         var backend = new RecordingBackend ();
         var service = new ProtonPlus.Utils.WineRunnerService (backend);
-        var binary = new ProtonPlus.Utils.WineBinary ("/usr/bin", "System Wine");
+        var root = create_temp_directory ();
+        write_file (Path.build_filename (root, "wineboot"), "");
+        var binary = new ProtonPlus.Utils.WineBinary (root, "System Wine");
 
         var loop = new MainLoop ();
         bool ok = false;
@@ -248,8 +250,8 @@ namespace AppTests.WineRunnerTest {
         assert (backend.ran_commands[0].contains ("win64"));
         assert (backend.ran_commands[0].contains ("-i"));
 
-        var root = create_temp_directory ();
-        var delete_target = Path.build_filename (root, "delete-me");
+        var delete_root = create_temp_directory ();
+        var delete_target = Path.build_filename (delete_root, "delete-me");
         make_directory (delete_target);
 
         loop = new MainLoop ();
@@ -262,6 +264,7 @@ namespace AppTests.WineRunnerTest {
         assert (ok);
         assert (!FileUtils.test (delete_target, FileTest.EXISTS));
 
+        assert (delete_directory (delete_root));
         assert (delete_directory (root));
     }
 
