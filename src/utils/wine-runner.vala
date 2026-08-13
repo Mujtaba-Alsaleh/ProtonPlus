@@ -417,5 +417,69 @@ namespace ProtonPlus.Utils {
                 build_env_command (prefix, binary.wine_path, { exe_path })
             );
         }
+
+        /* Proton prefixes live under steamapps/compatdata and must be driven
+         * through the game's Proton runtime with the Steam environment set.
+         * The `run` subcommand resolves winecfg, explorer and notepad from the
+         * runtime the same way Steam does. */
+        private string build_proton_command (string prefix, string proton_path,
+            string steam_library, string[] args) {
+            var parts = new Gee.ArrayList<string> ();
+            parts.add ("env");
+            parts.add ("STEAM_COMPAT_DATA_PATH=%s".printf (Shell.quote (prefix)));
+            parts.add ("STEAM_COMPAT_CLIENT_INSTALL_PATH=%s".printf (Shell.quote (steam_library)));
+            parts.add (Shell.quote (proton_path));
+            foreach (var arg in args)
+                parts.add (Shell.quote (arg));
+            return string.joinv (" ", parts.to_array ());
+        }
+
+        public async CommandResult test_prefix_with_proton (string prefix, string proton_path,
+            string steam_library) {
+            // wineboot -u validates and initializes the registry of an existing
+            // prefix.  A broken prefix fails here before any GUI is launched.
+            var wineboot = yield backend.run (
+                build_proton_command (prefix, proton_path, steam_library, { "run", "wineboot", "-u" })
+            );
+            if (wineboot.exit_status != 0)
+                return wineboot;
+
+            // Launch the bundled Notepad window as the visible smoke test.
+            return yield backend.run_detached (
+                build_proton_command (prefix, proton_path, steam_library, { "run", "notepad" })
+            );
+        }
+
+        public async CommandResult open_winecfg_with_proton (string prefix, string proton_path,
+            string steam_library) {
+            return yield backend.run_detached (
+                build_proton_command (prefix, proton_path, steam_library, { "run", "winecfg" })
+            );
+        }
+
+        public async CommandResult open_explorer_with_proton (string prefix, string proton_path,
+            string steam_library) {
+            return yield backend.run_detached (
+                build_proton_command (prefix, proton_path, steam_library, { "run", "explorer" })
+            );
+        }
+
+        public async CommandResult run_executable_with_proton (string prefix, string proton_path,
+            string steam_library, string exe_path) {
+            return yield backend.run_detached (
+                build_proton_command (prefix, proton_path, steam_library, { "run", exe_path })
+            );
+        }
+
+        public async bool rebuild_prefix_with_proton (string prefix, string proton_path,
+            string steam_library) {
+            if (!(yield delete_prefix (prefix)))
+                return false;
+            // wineboot --init bootstraps a fresh registry through Proton.
+            var result = yield backend.run (
+                build_proton_command (prefix, proton_path, steam_library, { "run", "wineboot", "--init" })
+            );
+            return result.exit_status == 0;
+        }
     }
 }

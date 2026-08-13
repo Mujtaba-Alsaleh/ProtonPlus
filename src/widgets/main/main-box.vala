@@ -65,6 +65,7 @@ namespace ProtonPlus.Widgets.Main {
                 update_header_presentation ();
                 search_availability_changed (search_available ());
             });
+            games_box.prefix_requested.connect (on_game_prefix_requested);
 
             mangohud_box = new MangoHud.Box ();
             prefixes_box = new Prefixes.Box ();
@@ -156,6 +157,11 @@ namespace ProtonPlus.Widgets.Main {
         public void navigate_to_download (Services.InstallJob job) {
             view_stack.set_visible_child_name ("tools");
             tools_box.show_download (job);
+        }
+
+        void on_game_prefix_requested (Games.GameListItem item) {
+            view_stack.set_visible_child_name ("prefixes");
+            prefixes_box.focus_prefix (item.game);
         }
 
         public void send_toast (string title) {

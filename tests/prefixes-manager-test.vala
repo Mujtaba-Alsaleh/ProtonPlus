@@ -12,6 +12,7 @@ namespace AppTests.PrefixesManagerTest {
         Test.add_func ("/prefixes/ignores-symlinked-directories", test_ignores_symlinked_directories);
         Test.add_func ("/prefixes/tweak-detection", test_tweak_detection);
         Test.add_func ("/prefixes/tweak-detection-clean", test_tweak_detection_clean);
+        Test.add_func ("/prefixes/scan-prefix-path", test_scan_prefix_path);
     }
 
     private string create_temp_directory () {
@@ -333,6 +334,60 @@ namespace AppTests.PrefixesManagerTest {
         scan_details ((!) found);
 
         assert (((!) found).detected_tweaks.length == 0);
+
+        assert (delete_directory (root));
+    }
+
+    private void test_scan_prefix_path () {
+        var root = create_temp_directory ();
+        var home = Path.build_filename (root, "home");
+        var compatdata = Path.build_filename (home, ".local", "share", "Steam", "steamapps", "compatdata", "12345");
+        var compatdata_pfx = Path.build_filename (compatdata, "pfx");
+        make_directory (Path.build_filename (compatdata_pfx, "drive_c", "windows", "syswow64"));
+        var user_prefix = Path.build_filename (home, "user-prefix");
+        make_directory (Path.build_filename (user_prefix, "drive_c", "windows"));
+
+        // The home scan keeps Steam compatdata out…
+        var skipped = scan (home, true);
+        assert (!has_prefix (skipped, compatdata));
+        assert (has_prefix (skipped, user_prefix));
+
+        // …but the targeted scan can focus it directly, resolving the real
+        // Wine prefix root inside the compatdata container (`pfx`), the same
+        // layout protontricks and prefixer use.
+        var loop = new MainLoop ();
+        ProtonPlus.Utils.WinePrefix? found = null;
+        ProtonPlus.Utils.WinePrefixManager.instance.scan_prefix_path.begin (compatdata, (obj, res) => {
+            found = ProtonPlus.Utils.WinePrefixManager.instance.scan_prefix_path.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (found != null);
+        assert (((!) found).path == compatdata_pfx);
+        assert (((!) found).architecture == "64-bit");
+
+        // A path that is already a Wine prefix root resolves directly.
+        loop = new MainLoop ();
+        ProtonPlus.Utils.WinePrefix? direct = null;
+        ProtonPlus.Utils.WinePrefixManager.instance.scan_prefix_path.begin (user_prefix, (obj, res) => {
+            direct = ProtonPlus.Utils.WinePrefixManager.instance.scan_prefix_path.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (direct != null);
+        assert (((!) direct).path == user_prefix);
+        assert (((!) direct).architecture == "32-bit");
+
+        // Non-prefix directories and missing paths yield nothing.
+        loop = new MainLoop ();
+        ProtonPlus.Utils.WinePrefix? missing = null;
+        ProtonPlus.Utils.WinePrefixManager.instance.scan_prefix_path.begin (
+            Path.build_filename (home, "nope"), (obj, res) => {
+            missing = ProtonPlus.Utils.WinePrefixManager.instance.scan_prefix_path.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (missing == null);
 
         assert (delete_directory (root));
     }

@@ -339,6 +339,7 @@ namespace ProtonPlus.Widgets.Games {
         bool selection_mode_active = false;
 
         public signal void header_presentation_changed (Header.Presentation? presentation);
+        public signal void prefix_requested (GameListItem item);
 
         construct {
             image = new Gtk.Image ();
@@ -569,7 +570,7 @@ namespace ProtonPlus.Widgets.Games {
             factory.setup.connect ((object) => {
                 var list_item = (Gtk.ListItem) object;
                 var row = new GameRow (
-                    focus_narrow_relative, activate_game_item
+                    focus_narrow_relative, activate_game_item, request_prefix
                 );
                 list_item.set_activatable (true);
                 list_item.set_focusable (false);
@@ -738,7 +739,7 @@ namespace ProtonPlus.Widgets.Games {
                 list_item.set_focusable (false);
                 list_item.set_selectable (false);
                 list_item.set_child (new GameActions (
-                    focus_wide_relative, focus_wide_title
+                    focus_wide_relative, focus_wide_title, request_prefix
                 ));
             });
             factory.bind.connect ((object) => {
@@ -1093,6 +1094,10 @@ namespace ProtonPlus.Widgets.Games {
             if (item == null)
                 return;
             activate_game_item ((!) item);
+        }
+
+        void request_prefix (GameListItem item) {
+            prefix_requested (item);
         }
 
         void activate_game_item (GameListItem item) {

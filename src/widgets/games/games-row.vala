@@ -4,6 +4,7 @@ namespace ProtonPlus.Widgets.Games {
     );
     public delegate bool GamePeerFocusRequest (GameListItem item);
     public delegate void GameActivationRequest (GameListItem item);
+    public delegate void GamePrefixRequest (GameListItem item);
 
     public enum GameTextCellKind {
         TITLE,
@@ -268,17 +269,21 @@ namespace ProtonPlus.Widgets.Games {
     public class GameActions : Gtk.Box, Utils.ControllerDirectionalFocus,
         Utils.ControllerActivationHandler {
         Gtk.Button launch_button;
+        Gtk.Button prefix_button;
         ExtraButton extra_button;
         GameActionTarget target;
         unowned GameVerticalFocusRequest vertical_focus;
         unowned GamePeerFocusRequest selection_focus;
+        unowned GamePrefixRequest prefix_request;
+        ulong settings_handler = 0;
         bool selection_mode = false;
 
         public GameActions (GameVerticalFocusRequest vertical_focus,
-            GamePeerFocusRequest selection_focus) {
+            GamePeerFocusRequest selection_focus, GamePrefixRequest prefix_request) {
             Object (orientation: Gtk.Orientation.HORIZONTAL, spacing: 6);
             this.vertical_focus = vertical_focus;
             this.selection_focus = selection_focus;
+            this.prefix_request = prefix_request;
             set_halign (Gtk.Align.START);
             set_valign (Gtk.Align.CENTER);
 
@@ -294,8 +299,23 @@ namespace ProtonPlus.Widgets.Games {
                     Utils.System.open_uri ("steam://run/" + ((!) steam_game).appid.to_string ());
             });
 
+            prefix_button = new Gtk.Button.from_icon_name (
+                "drive-harddisk-symbolic"
+            ) {
+                css_classes = { "flat" }
+            };
+            prefix_button.clicked.connect (() => {
+                var item = target.item;
+                if (item != null)
+                    prefix_request ((!) item);
+            });
+            settings_handler = Globals.SETTINGS.changed["experimental-features"].connect (
+                refresh_prefix_visibility
+            );
+
             extra_button = new ExtraButton (target);
             append (launch_button);
+            append (prefix_button);
             append (extra_button.button);
         }
 
@@ -320,6 +340,13 @@ namespace ProtonPlus.Widgets.Games {
                 _("Launch %s").printf (item.game.name),
                 -1
             );
+            prefix_button.set_tooltip_text (_("Open Wine Prefixes"));
+            prefix_button.update_property (
+                Gtk.AccessibleProperty.LABEL,
+                _("Open the Wine prefix of %s").printf (item.game.name),
+                -1
+            );
+            refresh_prefix_visibility ();
             extra_button.bind (item);
             refresh_visibility ();
         }
@@ -327,9 +354,32 @@ namespace ProtonPlus.Widgets.Games {
         public void unbind () {
             extra_button.unbind ();
             launch_button.set_visible (false);
+            prefix_button.set_visible (false);
+            prefix_button.reset_property (Gtk.AccessibleProperty.LABEL);
             launch_button.reset_property (Gtk.AccessibleProperty.LABEL);
             target.unbind ();
             set_visible (false);
+        }
+
+        public override void dispose () {
+            if (settings_handler != 0) {
+                Globals.SETTINGS.disconnect (settings_handler);
+                settings_handler = 0;
+            }
+            unbind ();
+            base.dispose ();
+        }
+
+        /* The prefix shortcut is experimental and only meaningful for games
+         * whose prefix directory already exists. */
+        void refresh_prefix_visibility () {
+            var item = target.item;
+            prefix_button.set_visible (
+                item != null && Globals.SETTINGS.get_boolean ("experimental-features")
+                    && ((!) item).has_prefix_directory
+                    && ((!) item).game is Models.Games.Steam
+            );
+            refresh_visibility ();
         }
 
         public GameListItem? get_item () {
@@ -395,6 +445,10 @@ namespace ProtonPlus.Widgets.Games {
                 launch_button.activate ();
                 return true;
             }
+            if (action == prefix_button) {
+                prefix_button.activate ();
+                return true;
+            }
             if (action == extra_button.button) {
                 extra_button.button.popup ();
                 return true;
@@ -435,7 +489,8 @@ namespace ProtonPlus.Widgets.Games {
 
         void refresh_visibility () {
             set_visible (!selection_mode && target.item != null &&
-                (launch_button.get_visible () || extra_button.button.get_visible ()));
+                (launch_button.get_visible () || prefix_button.get_visible () ||
+                 extra_button.button.get_visible ()));
         }
     }
 
@@ -452,12 +507,15 @@ namespace ProtonPlus.Widgets.Games {
         ulong tool_title_handler = 0;
         unowned GameVerticalFocusRequest vertical_focus;
         unowned GameActivationRequest activation_request;
+        unowned GamePrefixRequest prefix_request;
 
         public GameRow (GameVerticalFocusRequest vertical_focus,
-            GameActivationRequest activation_request) {
+            GameActivationRequest activation_request,
+            GamePrefixRequest prefix_request) {
             Object (orientation: Gtk.Orientation.VERTICAL, spacing: 4);
             this.vertical_focus = vertical_focus;
             this.activation_request = activation_request;
+            this.prefix_request = prefix_request;
             set_focusable (true);
             set_hexpand (true);
             set_margin_top (10);
@@ -492,7 +550,7 @@ namespace ProtonPlus.Widgets.Games {
             details_line.append (tool_label);
             details_line.append (prefix_label);
 
-            actions = new GameActions (on_vertical_focus, focus_selection);
+            actions = new GameActions (on_vertical_focus, focus_selection, prefix_request);
             actions.set_margin_start (30);
 
             append (title_line);

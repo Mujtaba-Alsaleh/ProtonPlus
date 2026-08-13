@@ -30,6 +30,7 @@ namespace AppTests.WineRunnerTest {
         Test.add_func ("/wine-runner/clone-symlinks-inside-prefix", test_clone_symlinks_inside_prefix);
         Test.add_func ("/wine-runner/clone-external-symlinks-verbatim", test_clone_external_symlinks_verbatim);
         Test.add_func ("/wine-runner/clone-absolute-into-prefix-rewritten", test_clone_absolute_into_prefix_rewritten);
+        Test.add_func ("/wine-runner/proton-commands", test_proton_commands);
     }
 
     private string create_temp_directory () {
@@ -342,6 +343,79 @@ namespace AppTests.WineRunnerTest {
         }
 
         assert (delete_directory (root));
+    }
+
+    private void test_proton_commands () {
+        var backend = new RecordingBackend ();
+        var service = new ProtonPlus.Utils.WineRunnerService (backend);
+        var prefix = "/tmp/pfx";
+        var proton = "/tmp/proton";
+        var library = "/tmp/steam";
+        var prefix_env = "STEAM_COMPAT_DATA_PATH=" + Shell.quote (prefix);
+        var library_env = "STEAM_COMPAT_CLIENT_INSTALL_PATH=" + Shell.quote (library);
+
+        var loop = new MainLoop ();
+        ProtonPlus.Utils.CommandResult? result = null;
+        service.test_prefix_with_proton.begin (prefix, proton, library, (obj, res) => {
+            result = service.test_prefix_with_proton.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (result != null && ((!) result).exit_status == 0);
+        assert (backend.ran_commands.size == 1);
+        assert (backend.ran_commands[0].contains (prefix_env));
+        assert (backend.ran_commands[0].contains (library_env));
+        assert (backend.ran_commands[0].contains (Shell.quote (proton)));
+        assert (backend.ran_commands[0].contains ("'wineboot' '-u'"));
+        assert (backend.detached_commands.size == 1);
+        assert (backend.detached_commands[0].contains (prefix_env));
+        assert (backend.detached_commands[0].contains ("'notepad'"));
+
+        loop = new MainLoop ();
+        service.open_winecfg_with_proton.begin (prefix, proton, library, (obj, res) => {
+            service.open_winecfg_with_proton.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (backend.detached_commands.size == 2);
+        assert (backend.detached_commands[1].contains ("'winecfg'"));
+
+        loop = new MainLoop ();
+        service.open_explorer_with_proton.begin (prefix, proton, library, (obj, res) => {
+            service.open_explorer_with_proton.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (backend.detached_commands.size == 3);
+        assert (backend.detached_commands[2].contains ("'explorer'"));
+
+        loop = new MainLoop ();
+        service.run_executable_with_proton.begin (prefix, proton, library, "/tmp/app.exe", (obj, res) => {
+            service.run_executable_with_proton.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (backend.detached_commands.size == 4);
+        assert (backend.detached_commands[3].contains (Shell.quote ("/tmp/app.exe")));
+
+        var delete_root = create_temp_directory ();
+        var delete_target = Path.build_filename (delete_root, "rebuild-me");
+        make_directory (delete_target);
+        loop = new MainLoop ();
+        bool ok = false;
+        service.rebuild_prefix_with_proton.begin (delete_target, proton, library, (obj, res) => {
+            ok = service.rebuild_prefix_with_proton.end (res);
+            loop.quit ();
+        });
+        loop.run ();
+        assert (ok);
+        assert (!FileUtils.test (delete_target, FileTest.EXISTS));
+        var last = backend.ran_commands[backend.ran_commands.size - 1];
+        assert (last.contains ("STEAM_COMPAT_DATA_PATH=" + Shell.quote (delete_target)));
+        assert (last.contains (library_env));
+        assert (last.contains ("'wineboot' '--init'"));
+
+        assert (delete_directory (delete_root));
     }
 
     private void test_clone_absolute_into_prefix_rewritten () {

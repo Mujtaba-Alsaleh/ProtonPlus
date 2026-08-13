@@ -1,8 +1,8 @@
 namespace ProtonPlus.Widgets.Prefixes {
     public class Box : Gtk.Box {
         private Gtk.Box results_box;
+        private Gtk.Box content_box;
         private Gtk.Box scan_prompt;
-        private Gtk.Label status_label;
         private Gtk.Spinner spinner;
         private Gtk.Button rescan_button;
         private Gtk.Switch show_tools_switch;
@@ -18,6 +18,8 @@ namespace ProtonPlus.Widgets.Prefixes {
         private Gee.LinkedList<Models.Launcher>? launchers = null;
         private Gtk.DropDown runner_dropdown;
         private Gtk.Label version_label;
+        private Models.Game? focused_game = null;
+        private Adw.Banner? focus_banner = null;
 
         public signal void toast_sent (string title);
 
@@ -38,8 +40,33 @@ namespace ProtonPlus.Widgets.Prefixes {
                 scrolled_window.get_vadjustment ().value = 0;
         }
 
+        /* Focus the prefix owned by a specific game (e.g. a Steam compatdata
+         * prefix opened from the game row).  Actions on the focused prefix use
+         * the game's Proton runtime when one can be resolved. */
+        public void focus_prefix (Models.Game game) {
+            focused_game = game;
+            if (focus_banner != null)
+                content_box.remove (focus_banner);
+            focus_banner = new Adw.Banner (_ ("Showing prefix for “%s”").printf (game.name)) {
+                revealed = true
+            };
+            focus_banner.set_button_label (_ ("Show all prefixes"));
+            focus_banner.button_clicked.connect (exit_focus);
+            content_box.prepend (focus_banner);
+            refresh.begin ();
+        }
+
+        private void exit_focus () {
+            focused_game = null;
+            if (focus_banner != null) {
+                content_box.remove (focus_banner);
+                focus_banner = null;
+            }
+            refresh.begin ();
+        }
+
         private void build_ui () {
-            var content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 12) {
+            content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 12) {
                 margin_top = 12,
                 margin_bottom = 12,
                 margin_start = 12,
@@ -49,16 +76,16 @@ namespace ProtonPlus.Widgets.Prefixes {
             var header_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8) {
                 halign = Gtk.Align.START
             };
-            status_label = new Gtk.Label (null) {
-                halign = Gtk.Align.START,
-                xalign = 0
-            };
-            status_label.add_css_class ("heading");
             spinner = new Gtk.Spinner () {
                 visible = false
             };
+            var header_label = new Gtk.Label (_ ("Wine Prefixes")) {
+                halign = Gtk.Align.START,
+                xalign = 0,
+                css_classes = { "title-4" }
+            };
             header_box.append (spinner);
-            header_box.append (status_label);
+            header_box.append (header_label);
             content_box.append (header_box);
 
             results_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 12);
@@ -180,22 +207,33 @@ namespace ProtonPlus.Widgets.Prefixes {
             rescan_button.sensitive = false;
             spinner.visible = true;
             spinner.start ();
-            status_label.label = _ ("Scanning for Wine prefixes…");
+            toast_sent (_ ("Scanning for Wine prefixes…"));
             clear_results ();
 
-            var home = Environment.get_home_dir ();
-            var prefixes = yield Utils.WinePrefixManager.instance.scan (home, !show_tools_switch.active);
-
-            if (prefixes.size == 0) {
-                status_label.label = _ ("No Wine prefixes found");
-                show_scan_prompt ();
-            } else {
-                status_label.label = ngettext ("%u Wine prefix found", "%u Wine prefixes found", prefixes.size).printf (prefixes.size);
-                var group = new Adw.PreferencesGroup ();
-                foreach (var prefix in prefixes) {
-                    group.add (create_prefix_expander (prefix));
+            if (focused_game != null) {
+                var prefix = yield Utils.WinePrefixManager.instance.scan_prefix_path (focused_game.prefixdir);
+                if (prefix == null) {
+                    toast_sent (_ ("No prefix for “%s” yet. Launch the game once in Steam to create it.").printf (focused_game.name));
+                } else {
+                    var group = new Adw.PreferencesGroup ();
+                    group.add (create_prefix_expander ((!) prefix, true));
+                    results_box.append (group);
                 }
-                results_box.append (group);
+            } else {
+                var home = Environment.get_home_dir ();
+                var prefixes = yield Utils.WinePrefixManager.instance.scan (home, !show_tools_switch.active);
+
+                if (prefixes.size == 0) {
+                    toast_sent (_ ("No Wine prefixes found"));
+                    show_scan_prompt ();
+                } else {
+                    toast_sent (ngettext ("%u Wine prefix found", "%u Wine prefixes found", prefixes.size).printf (prefixes.size));
+                    var group = new Adw.PreferencesGroup ();
+                    foreach (var prefix in prefixes) {
+                        group.add (create_prefix_expander (prefix));
+                    }
+                    results_box.append (group);
+                }
             }
 
             spinner.stop ();
@@ -209,7 +247,7 @@ namespace ProtonPlus.Widgets.Prefixes {
             }
         }
 
-        private Adw.ExpanderRow create_prefix_expander (Utils.WinePrefix prefix) {
+        private Adw.ExpanderRow create_prefix_expander (Utils.WinePrefix prefix, bool auto_scan = false) {
             var row = new Adw.ExpanderRow () {
                 title = prefix.path,
                 subtitle = get_architecture_display (prefix),
@@ -245,6 +283,9 @@ namespace ProtonPlus.Widgets.Prefixes {
             row.add_suffix (actions_button);
 
             details_rows[prefix.path] = new Gee.ArrayList<Adw.PreferencesRow> ();
+
+            if (auto_scan)
+                scan_prefix_details.begin (prefix, row, details_button, details_spinner);
 
             return row;
         }
@@ -361,10 +402,20 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private async void on_test_run (Utils.WinePrefix prefix) {
-            var runner = get_selected_runner ();
-            if (runner == null)
+            Utils.WineBinary? wine;
+            string? proton;
+            string? steam_library;
+            if (!get_prefix_runner (out wine, out proton, out steam_library))
                 return;
-            var result = yield wine_runner.test_prefix (runner, prefix.path);
+
+            Utils.CommandResult result;
+            if (proton != null) {
+                result = yield wine_runner.test_prefix_with_proton (
+                    get_proton_data_path (prefix), (!) proton, (!) steam_library
+                );
+            } else {
+                result = yield wine_runner.test_prefix ((!) wine, prefix.path);
+            }
             if (result.exit_status != 0)
                 toast_sent (_ ("Couldn't test prefix: %s").printf (get_result_message (result)));
             else
@@ -372,19 +423,39 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private async void on_open_winecfg (Utils.WinePrefix prefix) {
-            var runner = get_selected_runner ();
-            if (runner == null)
+            Utils.WineBinary? wine;
+            string? proton;
+            string? steam_library;
+            if (!get_prefix_runner (out wine, out proton, out steam_library))
                 return;
-            var result = yield wine_runner.open_winecfg (runner, prefix.path);
+
+            Utils.CommandResult result;
+            if (proton != null) {
+                result = yield wine_runner.open_winecfg_with_proton (
+                    get_proton_data_path (prefix), (!) proton, (!) steam_library
+                );
+            } else {
+                result = yield wine_runner.open_winecfg ((!) wine, prefix.path);
+            }
             if (result.exit_status != 0)
                 toast_sent (_ ("Couldn't open Wine configuration: %s").printf (get_result_message (result)));
         }
 
         private async void on_open_explorer (Utils.WinePrefix prefix) {
-            var runner = get_selected_runner ();
-            if (runner == null)
+            Utils.WineBinary? wine;
+            string? proton;
+            string? steam_library;
+            if (!get_prefix_runner (out wine, out proton, out steam_library))
                 return;
-            var result = yield wine_runner.open_explorer (runner, prefix.path);
+
+            Utils.CommandResult result;
+            if (proton != null) {
+                result = yield wine_runner.open_explorer_with_proton (
+                    get_proton_data_path (prefix), (!) proton, (!) steam_library
+                );
+            } else {
+                result = yield wine_runner.open_explorer ((!) wine, prefix.path);
+            }
             if (result.exit_status != 0)
                 toast_sent (_ ("Couldn't open Explorer: %s").printf (get_result_message (result)));
         }
@@ -394,10 +465,20 @@ namespace ProtonPlus.Widgets.Prefixes {
                 toast_sent (_ ("No executable path given"));
                 return;
             }
-            var runner = get_selected_runner ();
-            if (runner == null)
+            Utils.WineBinary? wine;
+            string? proton;
+            string? steam_library;
+            if (!get_prefix_runner (out wine, out proton, out steam_library))
                 return;
-            var result = yield wine_runner.run_executable (runner, prefix.path, exe_path);
+
+            Utils.CommandResult result;
+            if (proton != null) {
+                result = yield wine_runner.run_executable_with_proton (
+                    get_proton_data_path (prefix), (!) proton, (!) steam_library, exe_path
+                );
+            } else {
+                result = yield wine_runner.run_executable ((!) wine, prefix.path, exe_path);
+            }
             if (result.exit_status != 0)
                 toast_sent (_ ("Couldn't run executable: %s").printf (get_result_message (result)));
         }
@@ -416,6 +497,44 @@ namespace ProtonPlus.Widgets.Prefixes {
                 return null;
             }
             return selected_runner;
+        }
+
+        /* The focused prefix is driven through the game's Proton runtime when
+         * one can be resolved; every other prefix uses the selected system
+         * Wine binary. */
+        private bool get_prefix_runner (out Utils.WineBinary? wine, out string? proton,
+            out string? steam_library) {
+            wine = null;
+            proton = null;
+            steam_library = null;
+
+            if (focused_game is Models.Games.Steam) {
+                var steam = (Models.Launchers.Steam) focused_game.launcher;
+                proton = steam.resolve_effective_proton_executable (focused_game.compatibility_tool);
+                if (proton != null) {
+                    steam_library = focused_game.launcher.directory;
+                    return true;
+                }
+            }
+
+            wine = get_selected_runner ();
+            return wine != null;
+        }
+
+        /* Proton derives its Wine prefix from STEAM_COMPAT_DATA_PATH and
+         * appends `pfx` itself, so the focused prefix must hand over its
+         * compatdata container rather than the resolved `…/pfx` root. */
+        private string get_proton_data_path (Utils.WinePrefix prefix) {
+            if (focused_game != null)
+                return focused_game.prefixdir;
+            return prefix.path;
+        }
+
+        private bool has_any_runner () {
+            Utils.WineBinary? wine;
+            string? proton;
+            string? steam_library;
+            return get_prefix_runner (out wine, out proton, out steam_library);
         }
 
         private async void refresh_runners () {
@@ -680,7 +799,7 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private void show_run_executable_dialog (Utils.WinePrefix prefix) {
-            if (get_selected_runner () == null)
+            if (!has_any_runner ())
                 return;
 
             var dialog = new Adw.AlertDialog (_ ("Run Executable"),
@@ -712,9 +831,6 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private void show_backup_dialog (Utils.WinePrefix prefix) {
-            if (get_selected_runner () == null)
-                return;
-
             var dialog = new Adw.AlertDialog (_ ("Backup Prefix"),
                 _ ("Create an archive of %s.").printf (prefix.path));
             dialog.add_response ("cancel", _ ("Cancel"));
@@ -803,9 +919,6 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private void show_restore_dialog (Utils.WinePrefix prefix) {
-            if (get_selected_runner () == null)
-                return;
-
             var dialog = new Adw.AlertDialog (_ ("Restore Prefix"),
                 _ ("Restore %s from a backup archive.").printf (prefix.path));
             dialog.add_response ("cancel", _ ("Cancel"));
@@ -860,9 +973,6 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private void show_clone_dialog (Utils.WinePrefix prefix) {
-            if (get_selected_runner () == null)
-                return;
-
             var dialog = new Adw.AlertDialog (_ ("Clone Prefix"),
                 _ ("Copy %s to a new prefix.").printf (prefix.path));
             dialog.add_response ("cancel", _ ("Cancel"));
@@ -944,12 +1054,22 @@ namespace ProtonPlus.Widgets.Prefixes {
         }
 
         private async void rebuild_prefix_checked (Utils.WinePrefix prefix) {
-            var runner = get_selected_runner ();
-            if (runner == null)
+            Utils.WineBinary? wine;
+            string? proton;
+            string? steam_library;
+            if (!get_prefix_runner (out wine, out proton, out steam_library))
                 return;
 
             toast_sent (_ ("Rebuilding %s…").printf (Path.get_basename (prefix.path)));
-            if (yield wine_runner.rebuild_prefix (runner, prefix.path, get_winearch (prefix)))
+            bool ok;
+            if (proton != null) {
+                ok = yield wine_runner.rebuild_prefix_with_proton (
+                    get_proton_data_path (prefix), (!) proton, (!) steam_library
+                );
+            } else {
+                ok = yield wine_runner.rebuild_prefix ((!) wine, prefix.path, get_winearch (prefix));
+            }
+            if (ok)
                 toast_sent (_ ("Prefix rebuilt"));
             else
                 toast_sent (_ ("Couldn't rebuild prefix"));

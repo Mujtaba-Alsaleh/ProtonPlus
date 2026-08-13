@@ -287,8 +287,11 @@ namespace ProtonPlus.Widgets.Games {
 
         void open_prefix_directory () {
             var item = target.item;
-            if (item != null && ((!) item).has_prefix_directory)
-                Utils.System.open_path (((!) item).game.prefixdir);
+            if (item != null && ((!) item).has_prefix_directory) {
+                var prefixdir = ((!) item).game.prefixdir;
+                var wine_root = Utils.WinePrefixManager.resolve_prefix_root (prefixdir);
+                Utils.System.open_path (wine_root ?? prefixdir);
+            }
         }
 
         void open_protontricks () {

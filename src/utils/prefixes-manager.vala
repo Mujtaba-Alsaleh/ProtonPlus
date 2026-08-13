@@ -57,6 +57,38 @@ namespace ProtonPlus.Utils {
             yield;
         }
 
+        /* A Steam compatdata container holds the actual Wine prefix in its
+         * `pfx` subdirectory (the layout protontricks and prefixer rely on
+         * too).  Return the directory that truly contains `drive_c` for a
+         * compatdata container or a plain prefix root, or null when no usable
+         * prefix is present yet. */
+        public static string? resolve_prefix_root (string prefix_root) {
+            if (FileUtils.test (Path.build_filename (prefix_root, "pfx", "drive_c"), FileTest.IS_DIR))
+                return Path.build_filename (prefix_root, "pfx");
+            if (FileUtils.test (Path.build_filename (prefix_root, "drive_c"), FileTest.IS_DIR))
+                return prefix_root;
+            return null;
+        }
+
+        /* Target a single prefix directly, bypassing the exclusion rules that
+         * keep Steam compatdata (and other tool-owned) prefixes out of the
+         * home-directory scan.  Used to focus a game's own prefix. */
+        public async WinePrefix? scan_prefix_path (string prefix_root) {
+            SourceFunc callback = scan_prefix_path.callback;
+            WinePrefix? result = null;
+            new Thread<void> ("prefix-path-scan", () => {
+                string? wine_root = resolve_prefix_root (prefix_root);
+                if (wine_root != null) {
+                    var prefix = new WinePrefix ((!) wine_root);
+                    prefix.architecture = _check_wine_arch ((!) wine_root);
+                    result = prefix;
+                }
+                Idle.add ((owned) callback);
+            });
+            yield;
+            return result;
+        }
+
         private string[] get_excluded_paths (string home) {
             return {
                 home + "/.local/share/Steam/steamapps/compatdata",
